@@ -1,0 +1,70 @@
+---
+# =============================================================================
+# Stage 1 - Deploy BIG-IP Tenant on rSeries via F5OS API
+# =============================================================================
+
+- name: Deploy rSeries BIG-IP Tenant
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../../vars/migration_vars.yml
+
+  tasks:
+
+    - name: Create tenant on rSeries via F5OS REST API
+      uri:
+        url: "https://{{ rseries_host }}:{{ rseries_api_port }}/api/data/f5-tenants:tenants"
+        method: POST
+        user: "{{ rseries_user }}"
+        password: "{{ lookup('env', 'RSERIES_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: "{{ rseries_validate_certs }}"
+        status_code: [200, 201, 204]
+        body_format: json
+        headers:
+          Content-Type: "application/yang-data+json"
+        body:
+          f5-tenants:tenant:
+            - name: "{{ tenant_name }}"
+              config:
+                name: "{{ tenant_name }}"
+                image: "{{ tenant_image }}"
+                mgmt-ip: "{{ tenant_mgmt_ip }}"
+                prefix-length: "{{ tenant_mgmt_prefix }}"
+                gateway: "{{ tenant_mgmt_gateway }}"
+                vlans: "{{ tenant_vlans }}"
+                vcpu-cores-per-node: "{{ tenant_vcpus }}"
+                memory: "{{ tenant_memory }}"
+                storage:
+                  size: "{{ tenant_disk_size }}"
+                running-state: "{{ tenant_state }}"
+      register: tenant_create_result
+
+    - name: Wait for tenant to reach Running state
+      uri:
+        url: "https://{{ rseries_host }}:{{ rseries_api_port }}/api/data/f5-tenants:tenants/tenant={{ tenant_name }}/state/status"
+        method: GET
+        user: "{{ rseries_user }}"
+        password: "{{ lookup('env', 'RSERIES_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: "{{ rseries_validate_certs }}"
+        headers:
+          Content-Type: "application/yang-data+json"
+      register: tenant_status
+      until: >
+        tenant_status.json is defined and
+        'Running' in (tenant_status.json.get('f5-tenants:status', ''))
+      retries: 40
+      delay: 30
+      failed_when: >
+        tenant_status.json is not defined or
+        'Failed' in (tenant_status.json.get('f5-tenants:status', ''))
+
+    - name: Print tenant status
+      debug:
+        msg: "Tenant {{ tenant_name }} is Running at {{ tenant_mgmt_ip }}"
+
+    - name: Wait additional time for BIG-IP TMOS to fully boot
+      pause:
+        seconds: 60
+        prompt: "Waiting for BIG-IP TMOS to fully initialize inside tenant..."

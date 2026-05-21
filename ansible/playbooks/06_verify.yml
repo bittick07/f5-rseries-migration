@@ -1,0 +1,114 @@
+---
+# =============================================================================
+# Stage 6 - Post Migration Verification
+# =============================================================================
+
+- name: Verify Migration on rSeries Tenant
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../../vars/migration_vars.yml
+
+  tasks:
+
+    - name: Check BIG-IP is responding
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/sys/ready"
+        method: GET
+        user: admin
+        password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+        status_code: [200]
+      register: ready_check
+
+    - name: Get virtual servers
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/ltm/virtual?$select=name,destination,enabled,availabilityState"
+        method: GET
+        user: admin
+        password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: virtual_servers
+
+    - name: Print virtual server list
+      debug:
+        msg: "VIP: {{ item.name }} | Destination: {{ item.destination }} | Enabled: {{ item.enabled | default('true') }}"
+      loop: "{{ virtual_servers.json.items }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Get pool list
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/ltm/pool?$select=name,availabilityState,activeMemberCnt"
+        method: GET
+        user: admin
+        password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: pools
+
+    - name: Print pool list
+      debug:
+        msg: "Pool: {{ item.name }} | Status: {{ item.availabilityState | default('unknown') }} | Active Members: {{ item.activeMemberCnt | default('0') }}"
+      loop: "{{ pools.json.items }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Get self IPs
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/net/self?$select=name,address,vlan,trafficGroup"
+        method: GET
+        user: admin
+        password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: self_ips
+
+    - name: Print self IP list
+      debug:
+        msg: "Self IP: {{ item.name }} | Address: {{ item.address }} | VLAN: {{ item.vlan }} | Traffic Group: {{ item.trafficGroup }}"
+      loop: "{{ self_ips.json.items }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Get provisioned modules
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/sys/provision?$select=name,level"
+        method: GET
+        user: admin
+        password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: provision_check
+
+    - name: Print provisioned modules
+      debug:
+        msg: "Module: {{ item.name }} | Level: {{ item.level }}"
+      loop: "{{ provision_check.json.items }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.level != 'none'
+
+    - name: Check failover state
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/sys/failover"
+        method: GET
+        user: admin
+        password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: failover_state
+
+    - name: Print failover state
+      debug:
+        msg: "Failover state: {{ failover_state.json.apiRawValues.apiAnonymous | default('unknown') }}"
+
+    - name: Print verification complete
+      debug:
+        msg: >
+          Migration verification complete for {{ tenant_hostname }}.
+          VIPs: {{ virtual_servers.json.items | length }},
+          Pools: {{ pools.json.items | length }},
+          Self IPs: {{ self_ips.json.items | length }}

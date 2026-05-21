@@ -1,0 +1,88 @@
+---
+# =============================================================================
+# F5 iSeries to rSeries Migration Variables
+# =============================================================================
+# Store passwords in AWX Credentials or GitLab CI/CD Variables - never here.
+# Reference them as: "{{ lookup('env', 'ISERIES_PASSWORD') }}"
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Source iSeries
+# -----------------------------------------------------------------------------
+iseries_host: 192.168.1.10
+iseries_user: root
+iseries_scf_name: migration
+iseries_scf_path: "/var/local/scf/{{ iseries_scf_name }}"
+
+# -----------------------------------------------------------------------------
+# Target rSeries F5OS Platform Layer
+# -----------------------------------------------------------------------------
+rseries_host: 192.168.1.20
+rseries_user: admin
+rseries_api_port: 443
+rseries_validate_certs: false
+
+# -----------------------------------------------------------------------------
+# Tenant Configuration
+# -----------------------------------------------------------------------------
+tenant_name: bigip-tenant1
+tenant_image: BIGIP-17.1.0-0.0.16.ALL-F5OS
+tenant_mgmt_ip: 192.168.1.30
+tenant_mgmt_prefix: 24
+tenant_mgmt_gateway: 192.168.1.1
+tenant_hostname: bigip-rseries01.example.com
+tenant_vcpus: 4
+tenant_memory: 14848
+tenant_disk_size: 82
+tenant_state: deployed
+
+# VLANs to assign to the tenant (must already exist at F5OS layer)
+tenant_vlans:
+  - 100
+  - 200
+  - 300
+
+# -----------------------------------------------------------------------------
+# Module Provisioning
+# -----------------------------------------------------------------------------
+modules:
+  ltm: nominal
+  gtm: nominal
+
+# -----------------------------------------------------------------------------
+# SCF Editing - Blocks to Remove
+# These are regex patterns matched against the start of each top-level block
+# -----------------------------------------------------------------------------
+scf_remove_patterns:
+  - "^sys management-ip"
+  - "^sys management-route"
+  - "^cm device "
+  - "^cm cert"
+  - "^cm key"
+  - "^cm bundle"
+  - "^cm device-group"
+  - "^cm trust-domain"
+  - "^net trunk"
+  - "^net stp"
+  - "^net fdb"
+  - "^net vlan"
+  - "^net interface"
+  - "turboflex"
+  - "epsec"
+  - "data-publisher"
+  - "servicediscovery"
+  - "appsvc"
+
+# -----------------------------------------------------------------------------
+# Local working directory for SCF files during pipeline run
+# -----------------------------------------------------------------------------
+scf_local_dir: "/tmp/f5_migration"
+scf_source_file: "{{ scf_local_dir }}/migration.scf"
+scf_edited_file: "{{ scf_local_dir }}/migration_edited.scf"
+scf_tar_file: "{{ scf_local_dir }}/migration.tar"
+
+# -----------------------------------------------------------------------------
+# Remote path on rSeries tenant where SCF will be loaded from
+# -----------------------------------------------------------------------------
+scf_remote_dir: "/var/local/scf"
+scf_remote_name: "migration_edited"

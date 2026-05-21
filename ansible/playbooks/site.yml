@@ -1,0 +1,25 @@
+---
+# =============================================================================
+# F5 iSeries to rSeries Migration - Master Playbook
+# =============================================================================
+# Run this to execute the full migration end to end.
+# Or run individual playbooks for specific stages.
+# =============================================================================
+
+- name: Stage 1 - Deploy rSeries Tenant
+  import_playbook: 01_deploy_tenant.yml
+
+- name: Stage 2 - Provision BIG-IP Modules
+  import_playbook: 02_provision_modules.yml
+
+- name: Stage 3 - Pull SCF from iSeries
+  import_playbook: 03_pull_scf.yml
+
+- name: Stage 4 - Edit SCF
+  import_playbook: 04_edit_scf.yml
+
+- name: Stage 5 - Apply SCF to rSeries Tenant
+  import_playbook: 05_apply_scf.yml
+
+- name: Stage 6 - Verify Migration
+  import_playbook: 06_verify.yml

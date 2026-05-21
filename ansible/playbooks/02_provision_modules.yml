@@ -1,0 +1,96 @@
+---
+# =============================================================================
+# Stage 2 - Set Hostname and Provision BIG-IP Modules on rSeries Tenant
+# =============================================================================
+
+- name: Provision BIG-IP Modules on rSeries Tenant
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../../vars/migration_vars.yml
+
+  tasks:
+
+    - name: Wait for BIG-IP tenant to be available
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/sys/ready"
+        method: GET
+        user: admin
+        password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+        status_code: [200]
+      register: bigip_ready
+      until: bigip_ready.status == 200
+      retries: 30
+      delay: 20
+
+    - name: Set BIG-IP hostname
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/sys/global-settings"
+        method: PATCH
+        user: admin
+        password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          hostname: "{{ tenant_hostname }}"
+
+    - name: Provision LTM module
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/sys/provision/ltm"
+        method: PATCH
+        user: admin
+        password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          level: "{{ modules.ltm }}"
+      when: modules.ltm is defined
+
+    - name: Provision GTM module
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/sys/provision/gtm"
+        method: PATCH
+        user: admin
+        password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          level: "{{ modules.gtm }}"
+      when: modules.gtm is defined
+
+    - name: Wait for provisioning to complete
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/sys/mcp-state"
+        method: GET
+        user: admin
+        password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: mcp_state
+      until: >
+        mcp_state.json is defined and
+        mcp_state.json.get('entries', {}) != {} and
+        'full-config-load-succeeded' in (mcp_state.json | string)
+      retries: 30
+      delay: 20
+
+    - name: Save config after provisioning
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/sys/config"
+        method: POST
+        user: admin
+        password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          command: save
+
+    - name: Print provisioning complete
+      debug:
+        msg: "Modules provisioned successfully on {{ tenant_hostname }}"

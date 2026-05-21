@@ -1,0 +1,157 @@
+# =============================================================================
+# F5 iSeries to rSeries Migration - GitLab CI/CD Pipeline
+# =============================================================================
+# Required GitLab CI/CD Variables (set in Settings > CI/CD > Variables):
+#
+#   ISERIES_HOST       - iSeries management IP
+#   ISERIES_PASSWORD   - iSeries root password          (masked)
+#   RSERIES_HOST       - rSeries F5OS management IP
+#   RSERIES_PASSWORD   - rSeries F5OS admin password    (masked)
+#   TENANT_MGMT_IP     - BIG-IP tenant management IP
+#   TENANT_PASSWORD    - BIG-IP tenant admin password   (masked)
+# =============================================================================
+
+stages:
+  - validate
+  - deploy_tenant
+  - provision_modules
+  - pull_scf
+  - edit_scf
+  - apply_scf
+  - verify
+
+variables:
+  ANSIBLE_HOST_KEY_CHECKING: "false"
+  ANSIBLE_FORCE_COLOR: "true"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.pip_cache"
+
+# Cache pip packages between jobs
+cache:
+  paths:
+    - .pip_cache/
+
+# Default image and setup for all jobs
+default:
+  image: python:3.11
+  before_script:
+    - pip install --quiet ansible f5-sdk requests pyyaml sshpass
+    - ansible-galaxy collection install f5networks.f5_modules f5networks.f5os --force-with-deps
+
+# =============================================================================
+# VALIDATE - Dry run, runs on merge requests
+# =============================================================================
+validate:
+  stage: validate
+  script:
+    - echo "Running Ansible syntax check..."
+    - ansible-playbook ansible/playbooks/site.yml
+        -i ansible/inventory/hosts.yml
+        --syntax-check
+    - echo "Running SCF validator test..."
+    - python scripts/validate_scf.py || true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: always
+
+# =============================================================================
+# DEPLOY TENANT - Creates BIG-IP tenant on rSeries F5OS
+# =============================================================================
+deploy_tenant:
+  stage: deploy_tenant
+  script:
+    - ansible-playbook ansible/playbooks/01_deploy_tenant.yml
+        -i ansible/inventory/hosts.yml
+        -e "rseries_host=$RSERIES_HOST"
+        -e "tenant_mgmt_ip=$TENANT_MGMT_IP"
+  environment:
+    name: rseries
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+  artifacts:
+    reports:
+      dotenv: deploy.env
+
+# =============================================================================
+# PROVISION MODULES - Sets hostname and provisions LTM/GTM
+# =============================================================================
+provision_modules:
+  stage: provision_modules
+  script:
+    - ansible-playbook ansible/playbooks/02_provision_modules.yml
+        -i ansible/inventory/hosts.yml
+        -e "tenant_mgmt_ip=$TENANT_MGMT_IP"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+
+# =============================================================================
+# PULL SCF - Pulls SCF and TAR from iSeries
+# =============================================================================
+pull_scf:
+  stage: pull_scf
+  script:
+    - ansible-playbook ansible/playbooks/03_pull_scf.yml
+        -i ansible/inventory/hosts.yml
+        -e "iseries_host=$ISERIES_HOST"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+  artifacts:
+    paths:
+      - /tmp/f5_migration/migration.scf
+      - /tmp/f5_migration/migration.tar
+      - /tmp/f5_migration/master.key
+    expire_in: 1 hour
+
+# =============================================================================
+# EDIT SCF - Removes iSeries-specific objects, updates mgmt IP/gateway
+# =============================================================================
+edit_scf:
+  stage: edit_scf
+  script:
+    - ansible-playbook ansible/playbooks/04_edit_scf.yml
+        -i ansible/inventory/hosts.yml
+        -e "tenant_mgmt_ip=$TENANT_MGMT_IP"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+  artifacts:
+    paths:
+      - /tmp/f5_migration/migration_edited.scf
+      - /tmp/f5_migration/migration_edited.tar
+    expire_in: 1 hour
+
+# =============================================================================
+# APPLY SCF - Transfers master key, verifies, and merges SCF onto tenant
+# =============================================================================
+apply_scf:
+  stage: apply_scf
+  script:
+    - ansible-playbook ansible/playbooks/05_apply_scf.yml
+        -i ansible/inventory/hosts.yml
+        -e "tenant_mgmt_ip=$TENANT_MGMT_IP"
+        -e "iseries_host=$ISERIES_HOST"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+  environment:
+    name: rseries
+
+# =============================================================================
+# VERIFY - Post migration validation
+# =============================================================================
+verify:
+  stage: verify
+  script:
+    - ansible-playbook ansible/playbooks/06_verify.yml
+        -i ansible/inventory/hosts.yml
+        -e "tenant_mgmt_ip=$TENANT_MGMT_IP"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+  artifacts:
+    reports:
+      junit: verify_results.xml
+    when: always

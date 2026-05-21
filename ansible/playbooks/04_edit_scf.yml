@@ -1,0 +1,52 @@
+---
+# =============================================================================
+# Stage 4 - Edit SCF (remove iSeries-specific objects, update mgmt IP/gateway)
+# =============================================================================
+
+- name: Edit SCF for rSeries Compatibility
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../../vars/migration_vars.yml
+
+  tasks:
+
+    - name: Run SCF edit Python script
+      script: ../../scripts/edit_scf.py
+      environment:
+        SCF_SOURCE: "{{ scf_source_file }}"
+        SCF_OUTPUT: "{{ scf_edited_file }}"
+        MGMT_IP: "{{ tenant_mgmt_ip }}"
+        MGMT_PREFIX: "{{ tenant_mgmt_prefix }}"
+        MGMT_GATEWAY: "{{ tenant_mgmt_gateway }}"
+        REMOVE_PATTERNS: "{{ scf_remove_patterns | join('|') }}"
+      register: edit_result
+
+    - name: Print SCF edit output
+      debug:
+        var: edit_result.stdout_lines
+
+    - name: Confirm edited SCF exists
+      stat:
+        path: "{{ scf_edited_file }}"
+      register: edited_file_check
+      failed_when: not edited_file_check.stat.exists
+
+    - name: Run SCF validation script
+      script: ../../scripts/validate_scf.py
+      environment:
+        SCF_FILE: "{{ scf_edited_file }}"
+      register: validate_result
+
+    - name: Print validation results
+      debug:
+        var: validate_result.stdout_lines
+
+    - name: Rename TAR to match edited SCF name
+      copy:
+        src: "{{ scf_tar_file }}"
+        dest: "{{ scf_local_dir }}/migration_edited.tar"
+
+    - name: Print edit stage complete
+      debug:
+        msg: "SCF editing complete. Edited file at {{ scf_edited_file }}"

@@ -1,0 +1,19 @@
+---
+# Group vars - loaded for all hosts
+# Import migration variables
+iseries_host: "{{ lookup('env', 'ISERIES_HOST') | default('192.168.1.10') }}"
+rseries_host: "{{ lookup('env', 'RSERIES_HOST') | default('192.168.1.20') }}"
+tenant_mgmt_ip: "{{ lookup('env', 'TENANT_MGMT_IP') | default('192.168.1.30') }}"
+
+# Passwords always come from environment / AWX Credentials
+iseries_password: "{{ lookup('env', 'ISERIES_PASSWORD') }}"
+rseries_password: "{{ lookup('env', 'RSERIES_PASSWORD') }}"
+tenant_password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+
+# F5 provider shorthand for bigip modules
+provider:
+  server: "{{ tenant_mgmt_ip }}"
+  user: admin
+  password: "{{ tenant_password }}"
+  validate_certs: false
+  no_f5_teem: true

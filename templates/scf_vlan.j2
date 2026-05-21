@@ -1,0 +1,21 @@
+{# templates/scf_vlan.j2 #}
+{# Jinja2 template for generating VLAN and self IP SCF blocks #}
+{# Used when you need to add VLANs back into an SCF after stripping them #}
+
+{% for vlan in vlans %}
+net vlan /Common/{{ vlan.name }} {
+    interfaces {
+        {{ vlan.interface }} { }
+    }
+    tag {{ vlan.tag }}
+}
+{% endfor %}
+
+{% for self_ip in self_ips %}
+net self /Common/{{ self_ip.name }} {
+    address {{ self_ip.address }}/{{ self_ip.prefix }}
+    allow-service {{ self_ip.allow_service | default('default') }}
+    traffic-group {{ self_ip.traffic_group | default('traffic-group-local-only') }}
+    vlan /Common/{{ self_ip.vlan }}
+}
+{% endfor %}

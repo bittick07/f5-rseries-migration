@@ -1,0 +1,105 @@
+---
+# =============================================================================
+# Stage 5 - Apply SCF to rSeries Tenant
+# =============================================================================
+
+- name: Apply SCF to rSeries BIG-IP Tenant
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../../vars/migration_vars.yml
+
+  tasks:
+
+    - name: Read master key from file
+      slurp:
+        src: "{{ scf_local_dir }}/master.key"
+      register: master_key_slurp
+      no_log: true
+
+    - name: Set master key variable
+      set_fact:
+        master_key: "{{ master_key_slurp.content | b64decode | trim }}"
+      no_log: true
+
+    - name: Install master key on rSeries tenant
+      shell: |
+        sshpass -p "{{ lookup('env', 'TENANT_PASSWORD') }}" \
+        ssh -o StrictHostKeyChecking=no \
+        admin@{{ tenant_mgmt_ip }} \
+        "f5mku -r {{ master_key }}"
+      no_log: true
+      register: master_key_install
+
+    - name: Verify master key installed successfully
+      shell: |
+        sshpass -p "{{ lookup('env', 'TENANT_PASSWORD') }}" \
+        ssh -o StrictHostKeyChecking=no \
+        admin@{{ tenant_mgmt_ip }} \
+        "f5mku -K"
+      register: key_verify
+      no_log: true
+      failed_when: key_verify.rc != 0
+
+    - name: Copy edited SCF to rSeries tenant
+      shell: |
+        sshpass -p "{{ lookup('env', 'TENANT_PASSWORD') }}" \
+        scp -o StrictHostKeyChecking=no \
+        {{ scf_edited_file }} \
+        admin@{{ tenant_mgmt_ip }}:{{ scf_remote_dir }}/{{ scf_remote_name }}.scf
+
+    - name: Copy TAR to rSeries tenant
+      shell: |
+        sshpass -p "{{ lookup('env', 'TENANT_PASSWORD') }}" \
+        scp -o StrictHostKeyChecking=no \
+        {{ scf_local_dir }}/migration_edited.tar \
+        admin@{{ tenant_mgmt_ip }}:{{ scf_remote_dir }}/{{ scf_remote_name }}.tar
+
+    - name: Fix file permissions on rSeries tenant
+      shell: |
+        sshpass -p "{{ lookup('env', 'TENANT_PASSWORD') }}" \
+        ssh -o StrictHostKeyChecking=no \
+        admin@{{ tenant_mgmt_ip }} \
+        "chmod 644 {{ scf_remote_dir }}/{{ scf_remote_name }}.scf {{ scf_remote_dir }}/{{ scf_remote_name }}.tar"
+
+    - name: Verify SCF on rSeries tenant (dry run)
+      shell: |
+        sshpass -p "{{ lookup('env', 'TENANT_PASSWORD') }}" \
+        ssh -o StrictHostKeyChecking=no \
+        admin@{{ tenant_mgmt_ip }} \
+        "tmsh load sys config file {{ scf_remote_dir }}/{{ scf_remote_name }} verify 2>&1"
+      register: verify_result
+      failed_when: >
+        'Loading configuration process failed' in verify_result.stdout or
+        verify_result.rc != 0
+
+    - name: Print verify output
+      debug:
+        var: verify_result.stdout_lines
+
+    - name: Merge SCF onto rSeries tenant
+      shell: |
+        sshpass -p "{{ lookup('env', 'TENANT_PASSWORD') }}" \
+        ssh -o StrictHostKeyChecking=no \
+        admin@{{ tenant_mgmt_ip }} \
+        "tmsh load sys config file {{ scf_remote_dir }}/{{ scf_remote_name }} merge 2>&1"
+      register: merge_result
+      failed_when: >
+        'Loading configuration process failed' in merge_result.stdout or
+        merge_result.rc != 0
+
+    - name: Print merge output
+      debug:
+        var: merge_result.stdout_lines
+
+    - name: Save config on rSeries tenant
+      shell: |
+        sshpass -p "{{ lookup('env', 'TENANT_PASSWORD') }}" \
+        ssh -o StrictHostKeyChecking=no \
+        admin@{{ tenant_mgmt_ip }} \
+        "tmsh save sys config"
+      register: save_result
+
+    - name: Print apply stage complete
+      debug:
+        msg: "SCF merged and saved successfully on {{ tenant_hostname }}"

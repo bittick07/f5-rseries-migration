@@ -1,0 +1,181 @@
+{
+  "workflow_job_templates": [
+    {
+      "name": "F5 iSeries to rSeries Migration",
+      "description": "Full automated migration from F5 iSeries to rSeries tenant",
+      "organization": "Default",
+      "inventory": "F5 Migration Inventory",
+      "extra_vars": "---\niseries_host: '192.168.1.10'\nrseries_host: '192.168.1.20'\ntenant_mgmt_ip: '192.168.1.30'\ntenant_mgmt_gateway: '192.168.1.1'\ntenant_hostname: 'bigip-rseries01.example.com'",
+      "ask_variables_on_launch": true,
+      "workflow_nodes": [
+        {
+          "identifier": "deploy-tenant",
+          "unified_job_template": {
+            "name": "F5 - 01 Deploy Tenant",
+            "type": "job_template"
+          },
+          "related": {
+            "success_nodes": ["provision-modules"],
+            "failure_nodes": [],
+            "always_nodes": []
+          }
+        },
+        {
+          "identifier": "provision-modules",
+          "unified_job_template": {
+            "name": "F5 - 02 Provision Modules",
+            "type": "job_template"
+          },
+          "related": {
+            "success_nodes": ["pull-scf"],
+            "failure_nodes": [],
+            "always_nodes": []
+          }
+        },
+        {
+          "identifier": "pull-scf",
+          "unified_job_template": {
+            "name": "F5 - 03 Pull SCF",
+            "type": "job_template"
+          },
+          "related": {
+            "success_nodes": ["edit-scf"],
+            "failure_nodes": [],
+            "always_nodes": []
+          }
+        },
+        {
+          "identifier": "edit-scf",
+          "unified_job_template": {
+            "name": "F5 - 04 Edit SCF",
+            "type": "job_template"
+          },
+          "related": {
+            "success_nodes": ["approval-node"],
+            "failure_nodes": [],
+            "always_nodes": []
+          }
+        },
+        {
+          "identifier": "approval-node",
+          "unified_job_template": {
+            "name": "Approve SCF Apply",
+            "type": "workflow_approval",
+            "timeout": 3600,
+            "description": "Review SCF edit output and approve before applying to rSeries tenant"
+          },
+          "related": {
+            "success_nodes": ["apply-scf"],
+            "failure_nodes": [],
+            "always_nodes": []
+          }
+        },
+        {
+          "identifier": "apply-scf",
+          "unified_job_template": {
+            "name": "F5 - 05 Apply SCF",
+            "type": "job_template"
+          },
+          "related": {
+            "success_nodes": ["verify"],
+            "failure_nodes": [],
+            "always_nodes": []
+          }
+        },
+        {
+          "identifier": "verify",
+          "unified_job_template": {
+            "name": "F5 - 06 Verify Migration",
+            "type": "job_template"
+          },
+          "related": {
+            "success_nodes": [],
+            "failure_nodes": [],
+            "always_nodes": []
+          }
+        }
+      ]
+    }
+  ],
+  "job_templates": [
+    {
+      "name": "F5 - 01 Deploy Tenant",
+      "description": "Deploy BIG-IP tenant on rSeries via F5OS API",
+      "job_type": "run",
+      "playbook": "ansible/playbooks/01_deploy_tenant.yml",
+      "ask_variables_on_launch": false
+    },
+    {
+      "name": "F5 - 02 Provision Modules",
+      "description": "Set hostname and provision LTM/GTM on BIG-IP tenant",
+      "job_type": "run",
+      "playbook": "ansible/playbooks/02_provision_modules.yml",
+      "ask_variables_on_launch": false
+    },
+    {
+      "name": "F5 - 03 Pull SCF",
+      "description": "Pull SCF and TAR from source iSeries",
+      "job_type": "run",
+      "playbook": "ansible/playbooks/03_pull_scf.yml",
+      "ask_variables_on_launch": false
+    },
+    {
+      "name": "F5 - 04 Edit SCF",
+      "description": "Remove iSeries-specific objects and update mgmt IP/gateway",
+      "job_type": "run",
+      "playbook": "ansible/playbooks/04_edit_scf.yml",
+      "ask_variables_on_launch": false
+    },
+    {
+      "name": "F5 - 05 Apply SCF",
+      "description": "Transfer master key, verify and merge SCF onto rSeries tenant",
+      "job_type": "run",
+      "playbook": "ansible/playbooks/05_apply_scf.yml",
+      "ask_variables_on_launch": false
+    },
+    {
+      "name": "F5 - 06 Verify Migration",
+      "description": "Post migration validation of VIPs, pools, self IPs, and modules",
+      "job_type": "run",
+      "playbook": "ansible/playbooks/06_verify.yml",
+      "ask_variables_on_launch": false
+    }
+  ],
+  "custom_credential_types": [
+    {
+      "name": "F5 Migration Passwords",
+      "description": "Passwords for F5 iSeries, rSeries, and BIG-IP tenant",
+      "kind": "cloud",
+      "inputs": {
+        "fields": [
+          {
+            "id": "iseries_password",
+            "type": "string",
+            "label": "iSeries Root Password",
+            "secret": true
+          },
+          {
+            "id": "rseries_password",
+            "type": "string",
+            "label": "rSeries Admin Password",
+            "secret": true
+          },
+          {
+            "id": "tenant_password",
+            "type": "string",
+            "label": "BIG-IP Tenant Admin Password",
+            "secret": true
+          }
+        ],
+        "required": ["iseries_password", "rseries_password", "tenant_password"]
+      },
+      "injectors": {
+        "env": {
+          "ISERIES_PASSWORD": "{{ iseries_password }}",
+          "RSERIES_PASSWORD": "{{ rseries_password }}",
+          "TENANT_PASSWORD": "{{ tenant_password }}"
+        }
+      }
+    }
+  ]
+}

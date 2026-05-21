@@ -1,0 +1,70 @@
+---
+# =============================================================================
+# Stage 3 - Pull SCF and TAR from Source iSeries
+# =============================================================================
+
+- name: Pull SCF from iSeries
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../../vars/migration_vars.yml
+
+  tasks:
+
+    - name: Create local working directory for SCF files
+      file:
+        path: "{{ scf_local_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Generate fresh SCF on iSeries
+      shell: |
+        sshpass -p "{{ lookup('env', 'ISERIES_PASSWORD') }}" \
+        ssh -o StrictHostKeyChecking=no \
+        {{ iseries_user }}@{{ iseries_host }} \
+        "tmsh save sys config file {{ iseries_scf_path }} && echo SUCCESS"
+      register: scf_save_result
+      failed_when: "'SUCCESS' not in scf_save_result.stdout"
+
+    - name: Copy SCF file from iSeries to local
+      shell: |
+        sshpass -p "{{ lookup('env', 'ISERIES_PASSWORD') }}" \
+        scp -o StrictHostKeyChecking=no \
+        {{ iseries_user }}@{{ iseries_host }}:{{ iseries_scf_path }}.scf \
+        {{ scf_source_file }}
+
+    - name: Copy TAR file from iSeries to local
+      shell: |
+        sshpass -p "{{ lookup('env', 'ISERIES_PASSWORD') }}" \
+        scp -o StrictHostKeyChecking=no \
+        {{ iseries_user }}@{{ iseries_host }}:{{ iseries_scf_path }}.tar \
+        {{ scf_tar_file }}
+
+    - name: Capture master key from iSeries
+      shell: |
+        sshpass -p "{{ lookup('env', 'ISERIES_PASSWORD') }}" \
+        ssh -o StrictHostKeyChecking=no \
+        {{ iseries_user }}@{{ iseries_host }} \
+        "f5mku -K"
+      register: master_key_result
+      no_log: true
+
+    - name: Save master key to temp file for use in later stages
+      copy:
+        content: "{{ master_key_result.stdout }}"
+        dest: "{{ scf_local_dir }}/master.key"
+        mode: '0600'
+      no_log: true
+
+    - name: Confirm SCF and TAR files exist locally
+      stat:
+        path: "{{ item }}"
+      register: file_check
+      loop:
+        - "{{ scf_source_file }}"
+        - "{{ scf_tar_file }}"
+      failed_when: not file_check.stat.exists
+
+    - name: Print SCF pull complete
+      debug:
+        msg: "SCF and TAR pulled successfully from {{ iseries_host }}"
