@@ -39,6 +39,43 @@
       loop_control:
         label: "{{ item.name }}"
 
+    - name: Disable ARP on all virtual servers
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/ltm/virtual/{{ item.name | urlencode }}"
+        method: PATCH
+        user: admin
+        password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          arp: disabled
+        status_code: [200, 201]
+      loop: "{{ virtual_servers.json.items }}"
+      loop_control:
+        label: "{{ item.name }}"
+      ignore_errors: true
+      register: arp_results
+
+    - name: Print ARP disable results
+      debug:
+        msg: "ARP disabled on VIP: {{ item.item.name }} | Status: {{ item.status }}"
+      loop: "{{ arp_results.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Save config after disabling ARP
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/sys/config"
+        method: POST
+        user: admin
+        password: "{{ lookup('env', 'TENANT_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        body:
+          command: save
+
     - name: Get pool list
       uri:
         url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/ltm/pool?$select=name,availabilityState,activeMemberCnt"
