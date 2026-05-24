@@ -68,3 +68,74 @@
       pause:
         seconds: 60
         prompt: "Waiting for BIG-IP TMOS to fully initialize inside tenant..."
+
+    # -------------------------------------------------------------------------
+    # Change admin and root passwords on the new tenant
+    # Default credentials are admin/admin - change immediately after boot
+    # -------------------------------------------------------------------------
+
+    - name: Change admin password on BIG-IP tenant
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/auth/user/admin"
+        method: PATCH
+        user: admin
+        password: admin
+        force_basic_auth: true
+        validate_certs: false
+        status_code: [200, 201]
+        body_format: json
+        headers:
+          Content-Type: "application/json"
+        body:
+          password: "{{ lookup('env', 'TENANT_ADMIN_PASSWORD_NEW') }}"
+          passwordConfirm: "{{ lookup('env', 'TENANT_ADMIN_PASSWORD_NEW') }}"
+      register: admin_password_result
+      retries: 5
+      delay: 15
+      until: admin_password_result.status in [200, 201]
+
+    - name: Confirm admin password change
+      debug:
+        msg: "Admin password changed successfully on {{ tenant_mgmt_ip }}"
+
+    - name: Change root password on BIG-IP tenant
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/auth/user/root"
+        method: PATCH
+        user: admin
+        password: "{{ lookup('env', 'TENANT_ADMIN_PASSWORD_NEW') }}"
+        force_basic_auth: true
+        validate_certs: false
+        status_code: [200, 201]
+        body_format: json
+        headers:
+          Content-Type: "application/json"
+        body:
+          password: "{{ lookup('env', 'TENANT_ROOT_PASSWORD_NEW') }}"
+          passwordConfirm: "{{ lookup('env', 'TENANT_ROOT_PASSWORD_NEW') }}"
+      register: root_password_result
+      retries: 5
+      delay: 15
+      until: root_password_result.status in [200, 201]
+
+    - name: Confirm root password change
+      debug:
+        msg: "Root password changed successfully on {{ tenant_mgmt_ip }}"
+
+    - name: Verify new admin password works
+      uri:
+        url: "https://{{ tenant_mgmt_ip }}/mgmt/tm/sys/version"
+        method: GET
+        user: admin
+        password: "{{ lookup('env', 'TENANT_ADMIN_PASSWORD_NEW') }}"
+        force_basic_auth: true
+        validate_certs: false
+        status_code: [200]
+      register: verify_result
+      retries: 3
+      delay: 10
+      until: verify_result.status == 200
+
+    - name: Print completion message
+      debug:
+        msg: "Tenant {{ tenant_name }} deployed and passwords set successfully at {{ tenant_mgmt_ip }}"
